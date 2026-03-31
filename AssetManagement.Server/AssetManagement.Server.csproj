@@ -1,0 +1,40 @@
+<!--
+  FILE:    AssetManagement.Server.csproj
+  PURPOSE: Server project file for IN-MEMORY mode.
+           EF Core, Npgsql, and BCrypt packages removed — not needed without a database.
+           The Migrations folder is excluded from compilation since it depends on EF Core.
+           When switching back to PostgreSQL, restore the full package list and remove
+           the Compile Exclude entries below.
+-->
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- Exclude EF Core migration files — not compiled in in-memory mode -->
+  <ItemGroup>
+    <Compile Remove="Migrations\**" />
+    <Content Remove="Migrations\**" />
+    <EmbeddedResource Remove="Migrations\**" />
+    <None Remove="Migrations\**" />
+  </ItemGroup>
+
+  <!-- Exclude EF Core data files — replaced by InMemoryDataStore -->
+  <ItemGroup>
+    <Compile Remove="Data\AssetManagementDbContext.cs" />
+    <Compile Remove="Data\DatabaseEntityModels.cs" />
+    <Compile Remove="Data\DatabaseSeeder.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Hosts the Blazor WASM client and serves API endpoints -->
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AssetManagement.Client\AssetManagement.Client.csproj" />
+    <ProjectReference Include="..\AssetManagement.Shared\AssetManagement.Shared.csproj" />
+  </ItemGroup>
+</Project>
