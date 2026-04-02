@@ -1,4 +1,3 @@
-# Asset Management — Zelda & Samus Law
 
 ---
 
@@ -64,15 +63,13 @@ AssetManagement.sln
 |---|---|---|
 | admin | admin123 | Admin |
 | manager | pass123 | Manager |
-| viewer | view123 | Viewer |
-| dbernard | pass456 | Manager |
-| jsmith | pass789 | Viewer |
+| normal user | view123 | Viewer |
 
 ---
 **Role permissions:**
 - **Admin** — full access including user management and all security/compliance fields
 - **Manager** — can create, edit and assign assets; can view security fields
-- **Viewer** — read-only access across all pages
+- **Normal User** — read-only access across all pages
 ## API Endpoints
 
 | Method | Route | Notes |
