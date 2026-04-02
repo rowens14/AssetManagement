@@ -16,7 +16,7 @@
 <div class="page-hdr">
     <div class="page-hdr-left">
         <h2>Software Inventory &amp; Licenses</h2>
-        <div class="page-hdr-desc">Manage firm-wide application licenses and seat allocations.</div>
+       
     </div>
     @if (State.CanEdit)
     {
@@ -124,12 +124,6 @@
     </div>
 </div>
 
-<div class="req-footer">
-    <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-    </svg>
-    Requirement Mapping: FR 01, FR 02, FR 05, FR 10
-</div>
 
 @code {
     [Parameter] public EventCallback<LicenseDto?> OnEdit { get; set; }

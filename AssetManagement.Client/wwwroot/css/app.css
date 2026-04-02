@@ -1,9 +1,5 @@
-/* ═══════════════════════════════════════════════════════════
-   ASSET_MGR — Law Firm Asset Management
-   Mockup-faithful design system
-   ═══════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 html,body{height:100%;}
@@ -20,8 +16,8 @@ html,body{height:100%;}
   --violet:#7c3aed;--violet-bg:#ede9fe;--violet-t:#5b21b6;
   --sec-bg:#f0f5ff;--sec-border:#bfcfea;--sec-text:#1d4ed8;
   --sidebar-w:204px;--topbar-h:52px;
-  --font:'DM Sans',-apple-system,sans-serif;
-  --mono:'DM Mono','Fira Code',monospace;
+   --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
   --r:6px;--r-lg:10px;--r-xl:14px;
   --shadow:0 1px 3px rgba(0,0,0,.1),0 1px 2px rgba(0,0,0,.06);
   --shadow-lg:0 10px 30px rgba(0,0,0,.14),0 4px 10px rgba(0,0,0,.08);
