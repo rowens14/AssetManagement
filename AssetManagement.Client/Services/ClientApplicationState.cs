@@ -31,7 +31,7 @@ public class ClientApplicationState(ServerApiClient api)
     }
     public bool IsLoading { get; private set; }
 
-    // Cached data
+  
     public List<SiteDto>           Sites           { get; private set; } = [];
     public List<DepartmentDto>     Departments     { get; private set; } = [];
     public List<AppUserDto>        Users           { get; private set; } = [];
@@ -53,7 +53,7 @@ public class ClientApplicationState(ServerApiClient api)
     public event Action? OnChange;
     private void Notify() => OnChange?.Invoke();
 
-    // ── Auth ──────────────────────────────────────────────────────────────────
+   
     public async Task<string?> LoginAsync(string username, string password)
     {
         var resp = await api.LoginAsync(new LoginRequest { Username = username, Password = password });
@@ -79,7 +79,7 @@ public class ClientApplicationState(ServerApiClient api)
         Notify();
     }
 
-    // ── Load ──────────────────────────────────────────────────────────────────
+   
     public async Task LoadAllAsync()
     {
         IsLoading = true; Notify();
@@ -102,7 +102,7 @@ public class ClientApplicationState(ServerApiClient api)
     public async Task LoadLicensesAsync()    { Licenses        = await api.GetLicensesAsync()    ?? []; Notify(); }
     public async Task LoadAuditAsync()       { AuditLog        = await api.GetAuditAsync()       ?? []; Notify(); }
 
-    // ── Assets ────────────────────────────────────────────────────────────────
+
     public async Task<string?> SaveAssetAsync(SaveAssetRequest req, bool isNew)
     {
         if (isNew)
@@ -137,7 +137,7 @@ public class ClientApplicationState(ServerApiClient api)
         ShowToast("Asset deleted."); Notify(); return true;
     }
 
-    // ── Assignments ───────────────────────────────────────────────────────────
+
     public async Task<string?> CreateAssignmentAsync(CreateAssignmentRequest req)
     {
         var (data, err) = await api.CreateAssignmentAsync(req);
@@ -171,7 +171,7 @@ public class ClientApplicationState(ServerApiClient api)
         ShowToast("Assignment deleted."); Notify();
     }
 
-    // ── Lifecycle Events ──────────────────────────────────────────────────────
+    
     public async Task<string?> CreateLifecycleEventAsync(CreateLifecycleEventRequest req)
     {
         var (data, err) = await api.CreateLifecycleEventAsync(req);
@@ -183,7 +183,7 @@ public class ClientApplicationState(ServerApiClient api)
         ShowToast("Lifecycle event recorded."); Notify(); return null;
     }
 
-    // ── Licenses ─────────────────────────────────────────────────────────────
+    
     public async Task<string?> SaveLicenseAsync(SaveLicenseRequest req, bool isNew)
     {
         if (isNew)
@@ -215,7 +215,7 @@ public class ClientApplicationState(ServerApiClient api)
         ShowToast("License deleted."); Notify();
     }
 
-    // ── Users ─────────────────────────────────────────────────────────────────
+    
     public async Task<string?> CreateUserAsync(CreateUserRequest req)
     {
         var (data, err) = await api.CreateUserAsync(req);
@@ -237,7 +237,7 @@ public class ClientApplicationState(ServerApiClient api)
         ShowToast($"User {(u?.IsActive == true ? "activated" : "deactivated")}."); Notify();
     }
 
-    // ── Toast ─────────────────────────────────────────────────────────────────
+   
     public void ShowToast(string text, string type = "")
     {
         var t = new ToastMessage { Text = text, Type = type };
