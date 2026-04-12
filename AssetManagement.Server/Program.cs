@@ -124,7 +124,7 @@ try
         var db = scope.ServiceProvider.GetRequiredService<AssetDbContext>();
         try
         {
-            await db.Database.MigrateAsync();
+            await db.Database.EnsureCreatedAsync();
             Log.Information("Migrations applied");
             await DatabaseSeeder.SeedAsync(db);
             Log.Information("Seed complete");
