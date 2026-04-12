@@ -13,6 +13,9 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using AssetManagement.Shared.Models;
+using AssetManagement.Shared.Models.DTOs.Audit;
+using AssetManagement.Shared.Models.DTOs.Dashboard;
+using AssetManagement.Shared.Models.DTOs.Employees;
 
 namespace AssetManagement.Client.Services;
 

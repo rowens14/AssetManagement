@@ -1,208 +1,291 @@
 /*
  * FILE: ReferenceDataControllers.cs
  * PROJECT: AssetManagement.Server / Controllers
- * PURPOSE: Six lightweight controllers serving reference and supporting data from
- *          InMemoryDataStore. No EF Core or PostgreSQL involved in this file.
- *
- *          LifecycleEventsController  — GET/POST asset lifecycle status transitions
- *          LicensesController         — GET/POST/PUT/DELETE software license records
- *          UsersController            — GET/POST users, PUT toggle active/inactive
- *          SitesController            — GET office site list (Naples, Fort Myers)
- *          DepartmentsController      — GET department list per site
- *          AuditController            — GET/POST immutable audit log entries
+ * PURPOSE: Six controllers for reference and supporting data. All require JWT auth
+ *          via ApiControllerBase. User identity is read from JWT claims.
  */
 
 using AssetManagement.Server.Data;
 using AssetManagement.Shared.Models;
+using AssetManagement.Shared.Models.DTOs.Audit;
+using AssetManagement.Shared.Models.DTOs.Dashboard;
+using AssetManagement.Shared.Models.DTOs.Employees;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace AssetManagement.Server.Controllers;
 
-// ── LIFECYCLE EVENTS ─────────────────────────────────────────────────────────
-[ApiController]
+// ── LIFECYCLE EVENTS ──────────────────────────────────────────────────────────
 [Route("api/[controller]")]
-public class LifecycleEventsController(InMemoryDataStore store) : ControllerBase
+public class LifecycleEventsController(AssetDbContext db) : ApiControllerBase
 {
     [HttpGet]
-    public List<LifecycleEventDto> GetAll() =>
-        store.LifecycleEvents.OrderByDescending(e => e.ChangedAt).ToList();
+    public async Task<List<LifecycleEventDto>> GetAll() =>
+        await db.LifecycleEvents
+            .Include(e => e.Asset)
+            .Include(e => e.ChangedBy).ThenInclude(u => u.Employee)
+            .OrderByDescending(e => e.ChangedAt)
+            .Select(e => MapEvent(e))
+            .ToListAsync();
 
     [HttpPost]
-    public ActionResult<LifecycleEventDto> Create(
-        [FromBody] CreateLifecycleEventRequest req,
-        [FromHeader(Name = "X-User-Id")] int userId)
+    public async Task<ActionResult<LifecycleEventDto>> Create([FromBody] CreateLifecycleEventRequest req)
     {
-        var asset = store.Assets.FirstOrDefault(a => a.Id == req.AssetId);
+        var asset = await db.Assets.FindAsync(req.AssetId);
         if (asset == null) return NotFound("Asset not found.");
         if (string.IsNullOrWhiteSpace(req.Reason)) return BadRequest("Reason is required.");
 
-        var user = store.GetUserById(userId);
-        var oldStatus = asset.LifecycleStatus;
+        var old = asset.LifecycleStatus;
         asset.LifecycleStatus = req.NewStatus;
 
-        var ev = new LifecycleEventDto
+        var ev = new LifecycleEvent
         {
-            Id                   = store.NextLcEventId(),
-            AssetId              = req.AssetId,
-            AssetCode            = asset.AssetCode,
-            OldStatus            = oldStatus,
-            NewStatus            = req.NewStatus,
-            Reason               = req.Reason,
-            ChangedByDisplayName = user?.DisplayName ?? "System",
-            ChangedAt            = DateOnly.FromDateTime(DateTime.UtcNow),
+            AssetId         = req.AssetId,
+            OldStatus       = old,
+            NewStatus       = req.NewStatus,
+            Reason          = req.Reason,
+            ChangedByUserId = CurrentUserId,
+            ChangedAt       = DateOnly.FromDateTime(DateTime.UtcNow),
         };
-        store.LifecycleEvents.Add(ev);
-        return CreatedAtAction(nameof(GetAll), ev);
+        db.LifecycleEvents.Add(ev);
+
+        db.AuditLogs.Add(new AuditLog
+        {
+            Ts       = DateTime.UtcNow,
+            UserId   = CurrentUserId,
+            Username = User.Identity?.Name ?? "",
+            Action   = $"Changed lifecycle for {asset.AssetCode}",
+            Target   = $"{old} → {req.NewStatus}",
+        });
+
+        await db.SaveChangesAsync();
+        await db.Entry(ev).Reference(e => e.Asset).LoadAsync();
+        await db.Entry(ev).Reference(e => e.ChangedBy).LoadAsync();
+        if (ev.ChangedBy != null)
+            await db.Entry(ev.ChangedBy).Reference(u => u.Employee).LoadAsync();
+
+        return CreatedAtAction(nameof(GetAll), MapEvent(ev));
     }
+
+    internal static LifecycleEventDto MapEvent(LifecycleEvent e) => new()
+    {
+        Id                   = e.Id,
+        AssetId              = e.AssetId,
+        AssetCode            = e.Asset?.AssetCode ?? "",
+        OldStatus            = e.OldStatus,
+        NewStatus            = e.NewStatus,
+        Reason               = e.Reason,
+        ChangedByDisplayName = e.ChangedBy?.Employee?.FullName ?? e.ChangedBy?.Username ?? "",
+        ChangedAt            = e.ChangedAt,
+    };
 }
 
 // ── LICENSES ─────────────────────────────────────────────────────────────────
-[ApiController]
 [Route("api/[controller]")]
-public class LicensesController(InMemoryDataStore store) : ControllerBase
+public class LicensesController(AssetDbContext db) : ApiControllerBase
 {
     [HttpGet]
-    public List<LicenseDto> GetAll() =>
-        store.Licenses.OrderByDescending(l => l.Id).ToList();
+    public async Task<List<LicenseDto>> GetAll() =>
+        await db.Assets
+            .Where(a => a.AssetType == "Software")
+            .Include(a => a.Site)
+            .Include(a => a.Vendor)
+            .Include(a => a.SoftwareDetail)
+            .OrderByDescending(a => a.Id)
+            .Select(a => MapLicense(a))
+            .ToListAsync();
 
     [HttpPost]
-    public ActionResult<LicenseDto> Create([FromBody] SaveLicenseRequest req)
+    public async Task<ActionResult<LicenseDto>> Create([FromBody] SaveLicenseRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Product) || req.Total < 0)
             return BadRequest("Product name and valid quantity required.");
 
-        var site = store.Sites.FirstOrDefault(s => s.Id == req.SiteId);
-        var lic = new LicenseDto
+        var vendor = await db.Vendors.FirstOrDefaultAsync(v => v.Name == req.Vendor);
+        if (vendor == null && !string.IsNullOrWhiteSpace(req.Vendor))
         {
-            Id       = store.NextLicenseId(),
-            Product  = req.Product,
-            Vendor   = req.Vendor,
-            SiteId   = req.SiteId,
-            SiteName = site?.Name ?? "",
-            Type     = req.Type,
-            Total    = req.Total,
-            Start    = req.Start,
-            Expiry   = req.Expiry,
-            Status   = req.Status,
+            vendor = new Vendor { Name = req.Vendor, Type = "Software" };
+            db.Vendors.Add(vendor);
+            await db.SaveChangesAsync();
+        }
+
+        var asset = new Asset
+        {
+            AssetCode       = $"SW-{Guid.NewGuid().ToString()[..8].ToUpper()}",
+            AssetTag        = $"SW-{Guid.NewGuid().ToString()[..8].ToUpper()}",
+            SerialNumber    = $"SW-{Guid.NewGuid().ToString()[..8].ToUpper()}",
+            AssetType       = "Software",
+            Model           = req.Product,
+            SiteId          = req.SiteId,
+            VendorId        = vendor?.Id,
+            LifecycleStatus = "Available",
+            CreatedAt       = DateOnly.FromDateTime(DateTime.UtcNow),
         };
-        store.Licenses.Add(lic);
-        return CreatedAtAction(nameof(GetAll), lic);
+        db.Assets.Add(asset);
+        await db.SaveChangesAsync();
+
+        db.SoftwareDetails.Add(new SoftwareDetail
+        {
+            AssetId     = asset.Id,
+            LicenseType = req.Type,
+            TotalSeats  = req.Total,
+            StartDate   = req.Start,
+            ExpiryDate  = req.Expiry,
+        });
+        await db.SaveChangesAsync();
+
+        await db.Entry(asset).Reference(a => a.Site).LoadAsync();
+        await db.Entry(asset).Reference(a => a.Vendor).LoadAsync();
+        await db.Entry(asset).Reference(a => a.SoftwareDetail).LoadAsync();
+        return CreatedAtAction(nameof(GetAll), MapLicense(asset));
     }
 
     [HttpPut("{id}")]
-    public ActionResult<LicenseDto> Update(int id, [FromBody] SaveLicenseRequest req)
+    public async Task<ActionResult<LicenseDto>> Update(int id, [FromBody] SaveLicenseRequest req)
     {
-        var lic = store.Licenses.FirstOrDefault(l => l.Id == id);
-        if (lic == null) return NotFound();
+        var asset = await db.Assets
+            .Include(a => a.Site).Include(a => a.Vendor).Include(a => a.SoftwareDetail)
+            .FirstOrDefaultAsync(a => a.Id == id && a.AssetType == "Software");
+        if (asset == null) return NotFound();
         if (string.IsNullOrWhiteSpace(req.Product) || req.Total < 0)
             return BadRequest("Product name and valid quantity required.");
 
-        var site = store.Sites.FirstOrDefault(s => s.Id == req.SiteId);
-        lic.Product  = req.Product;
-        lic.Vendor   = req.Vendor;
-        lic.SiteId   = req.SiteId;
-        lic.SiteName = site?.Name ?? "";
-        lic.Type     = req.Type;
-        lic.Total    = req.Total;
-        lic.Start    = req.Start;
-        lic.Expiry   = req.Expiry;
-        lic.Status   = req.Status;
-        return Ok(lic);
+        asset.Model  = req.Product;
+        asset.SiteId = req.SiteId;
+        var vendor = await db.Vendors.FirstOrDefaultAsync(v => v.Name == req.Vendor);
+        asset.VendorId = vendor?.Id;
+
+        if (asset.SoftwareDetail != null)
+        {
+            asset.SoftwareDetail.LicenseType = req.Type;
+            asset.SoftwareDetail.TotalSeats  = req.Total;
+            asset.SoftwareDetail.StartDate   = req.Start;
+            asset.SoftwareDetail.ExpiryDate  = req.Expiry;
+        }
+        await db.SaveChangesAsync();
+        await db.Entry(asset).Reference(a => a.Site).LoadAsync();
+        await db.Entry(asset).Reference(a => a.Vendor).LoadAsync();
+        return Ok(MapLicense(asset));
     }
 
     [HttpDelete("{id}")]
-    public IActionResult Delete(int id)
+    public async Task<IActionResult> Delete(int id)
     {
-        var lic = store.Licenses.FirstOrDefault(l => l.Id == id);
-        if (lic == null) return NotFound();
-        store.Licenses.Remove(lic);
+        var asset = await db.Assets.FirstOrDefaultAsync(a => a.Id == id && a.AssetType == "Software");
+        if (asset == null) return NotFound();
+        db.Assets.Remove(asset);
+        await db.SaveChangesAsync();
         return NoContent();
     }
+
+    private static LicenseDto MapLicense(Asset a) => new()
+    {
+        Id       = a.Id,
+        Product  = a.Model,
+        Vendor   = a.Vendor?.Name ?? "",
+        SiteId   = a.SiteId,
+        SiteName = a.Site?.Name ?? "",
+        Type     = a.SoftwareDetail?.LicenseType ?? "Per-Seat",
+        Total    = a.SoftwareDetail?.TotalSeats ?? 0,
+        Start    = a.SoftwareDetail?.StartDate,
+        Expiry   = a.SoftwareDetail?.ExpiryDate,
+        Status   = a.LifecycleStatus == "Available" ? "Active" : a.LifecycleStatus,
+    };
 }
 
 // ── USERS ─────────────────────────────────────────────────────────────────────
-[ApiController]
 [Route("api/[controller]")]
-public class UsersController(InMemoryDataStore store) : ControllerBase
+public class UsersController(AssetDbContext db) : ApiControllerBase
 {
     [HttpGet]
-    public List<AppUserDto> GetAll() =>
-        store.Users.Select(store.ToDto).ToList();
+    public async Task<List<AppUserDto>> GetAll() =>
+        await db.AppUsers
+            .Include(u => u.Employee).ThenInclude(e => e!.Site)
+            .Include(u => u.Employee).ThenInclude(e => e!.Department)
+            .Select(u => AuthController.MapUser(u))
+            .ToListAsync();
 
     [HttpPost]
-    public ActionResult<AppUserDto> Create([FromBody] CreateUserRequest req)
+    public async Task<ActionResult<AppUserDto>> Create([FromBody] CreateUserRequest req)
     {
-        if (store.Users.Any(u => u.Username == req.Username))
+        if (await db.AppUsers.AnyAsync(u => u.Username == req.Username))
             return Conflict("Username already taken.");
 
-        var site = store.Sites.FirstOrDefault(s => s.Id == req.SiteId);
-        var dept = store.Departments.FirstOrDefault(d => d.Id == req.DeptId);
-        var user = new InMemoryUser
+        var user = new AppUser
         {
-            Id            = store.NextUserId(),
-            Username      = req.Username,
-            DisplayName   = req.DisplayName,
-            PasswordPlain = req.Password,
-            Role          = req.Role,
-            SiteId        = req.SiteId,
-            SiteName      = site?.Name ?? "",
-            DeptId        = req.DeptId,
-            DeptName      = dept?.Name ?? "",
-            IsActive      = true,
+            Username     = req.Username,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
+            Role         = req.Role,
+            EmployeeId   = req.EmployeeId,
+            IsActive     = true,
         };
-        store.Users.Add(user);
-        return CreatedAtAction(nameof(GetAll), store.ToDto(user));
+        db.AppUsers.Add(user);
+        await db.SaveChangesAsync();
+        await db.Entry(user).Reference(u => u.Employee).LoadAsync();
+        if (user.Employee != null)
+        {
+            await db.Entry(user.Employee).Reference(e => e.Site).LoadAsync();
+            await db.Entry(user.Employee).Reference(e => e.Department).LoadAsync();
+        }
+        return CreatedAtAction(nameof(GetAll), AuthController.MapUser(user));
     }
 
     [HttpPut("{id}/toggle")]
-    public IActionResult Toggle(int id, [FromHeader(Name = "X-User-Id")] int requesterId)
+    public async Task<IActionResult> Toggle(int id)
     {
-        if (id == requesterId) return BadRequest("Cannot deactivate yourself.");
-        var user = store.GetUserById(id);
+        if (id == CurrentUserId) return BadRequest("Cannot deactivate yourself.");
+        var user = await db.AppUsers.FindAsync(id);
         if (user == null) return NotFound();
         user.IsActive = !user.IsActive;
+        await db.SaveChangesAsync();
         return NoContent();
     }
 }
 
 // ── SITES ─────────────────────────────────────────────────────────────────────
-[ApiController]
 [Route("api/[controller]")]
-public class SitesController(InMemoryDataStore store) : ControllerBase
+public class SitesController(AssetDbContext db) : ApiControllerBase
 {
     [HttpGet]
-    public List<SiteDto> GetAll() => store.Sites.ToList();
+    public async Task<List<SiteDto>> GetAll() =>
+        await db.Sites.Select(s => new SiteDto { Id = s.Id, Code = s.Code, Name = s.Name }).ToListAsync();
 }
 
 // ── DEPARTMENTS ───────────────────────────────────────────────────────────────
-[ApiController]
 [Route("api/[controller]")]
-public class DepartmentsController(InMemoryDataStore store) : ControllerBase
+public class DepartmentsController(AssetDbContext db) : ApiControllerBase
 {
     [HttpGet]
-    public List<DepartmentDto> GetAll() => store.Departments.ToList();
+    public async Task<List<DepartmentDto>> GetAll() =>
+        await db.Departments
+            .Include(d => d.Site)
+            .Select(d => new DepartmentDto { Id = d.Id, SiteId = d.SiteId, SiteName = d.Site.Name, Name = d.Name })
+            .ToListAsync();
 }
 
 // ── AUDIT ─────────────────────────────────────────────────────────────────────
-[ApiController]
 [Route("api/[controller]")]
-public class AuditController(InMemoryDataStore store) : ControllerBase
+public class AuditController(AssetDbContext db) : ApiControllerBase
 {
     [HttpGet]
-    public List<AuditEntryDto> GetAll() =>
-        store.AuditEntries.OrderByDescending(e => e.Ts).ToList();
+    public async Task<List<AuditEntryDto>> GetAll() =>
+        await db.AuditLogs
+            .OrderByDescending(e => e.Ts)
+            .Select(e => new AuditEntryDto { Id = e.Id, Ts = e.Ts, Username = e.Username, Action = e.Action, Target = e.Target })
+            .ToListAsync();
 
     [HttpPost]
-    public IActionResult Add([FromBody] AuditEntryDto entry)
+    public async Task<IActionResult> Add([FromBody] AuditEntryDto entry)
     {
-        store.AuditEntries.Add(new AuditEntryDto
+        db.AuditLogs.Add(new AuditLog
         {
-            Id       = store.NextAuditId(),
             Ts       = DateTime.UtcNow,
-            Username = entry.Username,
+            UserId   = CurrentUserId,
+            Username = User.Identity?.Name ?? entry.Username,
             Action   = entry.Action,
             Target   = entry.Target,
         });
+        await db.SaveChangesAsync();
         return NoContent();
     }
 }

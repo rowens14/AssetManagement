@@ -1,89 +1,131 @@
 /*
  * FILE: AssetAssignmentController.cs
  * PROJECT: AssetManagement.Server / Controllers
- * PURPOSE: REST API controller for asset assignment tracking.
- *          In in-memory mode, reads/writes InMemoryDataStore.Assignments directly.
- *          Creating an assignment automatically sets the asset lifecycle status to
- *          "Deployed" and appends a lifecycle event, matching real-DB behaviour.
- *          Routes: GET /api/assignments, POST /api/assignments,
- *                  PUT /api/assignments/{id}/return, DELETE /api/assignments/{id}
+ * PURPOSE: REST API for hardware asset assignment. Requires JWT authentication.
+ *          User identity is read from JWT claims via ApiControllerBase.CurrentUserId.
  */
 
 using AssetManagement.Server.Data;
 using AssetManagement.Shared.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace AssetManagement.Server.Controllers;
 
-[ApiController]
 [Route("api/[controller]")]
-public class AssignmentsController(InMemoryDataStore store) : ControllerBase
+public class AssignmentsController(AssetDbContext db) : ApiControllerBase
 {
     [HttpGet]
-    public List<AssignmentDto> GetAll() =>
-        store.Assignments.OrderByDescending(a => a.EffectiveDate).ToList();
+    public async Task<List<AssignmentDto>> GetAll() =>
+        await db.HardwareAssignments
+            .Include(a => a.Asset)
+            .Include(a => a.Employee)
+            .Include(a => a.CreatedBy).ThenInclude(u => u.Employee)
+            .OrderByDescending(a => a.EffectiveDate)
+            .Select(a => MapAssignment(a))
+            .ToListAsync();
 
     [HttpPost]
-    public ActionResult<AssignmentDto> Create(
-        [FromBody] CreateAssignmentRequest req,
-        [FromHeader(Name = "X-User-Id")] int userId)
+    public async Task<ActionResult<AssignmentDto>> Create([FromBody] CreateAssignmentRequest req)
     {
-        var asset = store.Assets.FirstOrDefault(a => a.Id == req.AssetId);
-        var user  = store.GetUserById(req.UserId);
-        if (asset == null || user == null) return BadRequest("Invalid asset or user.");
+        var asset   = await db.Assets.FindAsync(req.AssetId);
+        var appUser = await db.AppUsers
+            .Include(u => u.Employee)
+            .FirstOrDefaultAsync(u => u.Id == req.UserId);
 
-        var createdBy = store.GetUserById(userId);
-        var assignment = new AssignmentDto
+        if (asset == null)              return BadRequest("Asset not found.");
+        if (appUser?.Employee == null)  return BadRequest("User has no linked employee record.");
+
+        var assignment = new HardwareAssignment
         {
-            Id                   = store.NextAssignmentId(),
-            AssetId              = req.AssetId,
-            AssetCode            = asset.AssetCode,
-            AssetModel           = asset.Model,
-            UserId               = req.UserId,
-            UserDisplayName      = user.DisplayName,
-            UserUsername         = user.Username,
-            EffectiveDate        = req.EffectiveDate,
-            EndDate              = null,
-            CreatedByDisplayName = createdBy?.DisplayName ?? "System",
-            CreatedAt            = DateOnly.FromDateTime(DateTime.UtcNow),
+            AssetId         = req.AssetId,
+            EmployeeId      = appUser.Employee.Id,
+            CreatedByUserId = CurrentUserId,
+            EffectiveDate   = req.EffectiveDate,
+            EndDate         = null,
+            Notes           = req.Notes,
+            CreatedAt       = DateOnly.FromDateTime(DateTime.UtcNow),
         };
-        store.Assignments.Add(assignment);
+        db.HardwareAssignments.Add(assignment);
 
-        // Auto-deploy asset
         if (asset.LifecycleStatus != "Deployed")
         {
-            var oldStatus = asset.LifecycleStatus;
+            var old = asset.LifecycleStatus;
             asset.LifecycleStatus = "Deployed";
-            store.LifecycleEvents.Add(new LifecycleEventDto
+            db.LifecycleEvents.Add(new LifecycleEvent
             {
-                Id                   = store.NextLcEventId(),
-                AssetId              = asset.Id,
-                AssetCode            = asset.AssetCode,
-                OldStatus            = oldStatus,
-                NewStatus            = "Deployed",
-                Reason               = $"Assigned to {user.DisplayName}",
-                ChangedByDisplayName = createdBy?.DisplayName ?? "System",
-                ChangedAt            = DateOnly.FromDateTime(DateTime.UtcNow),
+                AssetId         = asset.Id,
+                OldStatus       = old,
+                NewStatus       = "Deployed",
+                Reason          = $"Assigned to {appUser.Employee.FullName}",
+                ChangedByUserId = CurrentUserId,
+                ChangedAt       = DateOnly.FromDateTime(DateTime.UtcNow),
             });
         }
-        return CreatedAtAction(nameof(GetAll), assignment);
+
+        db.AuditLogs.Add(new AuditLog
+        {
+            Ts       = DateTime.UtcNow,
+            UserId   = CurrentUserId,
+            Username = User.Identity?.Name ?? "",
+            Action   = "Assigned asset",
+            Target   = $"{asset.AssetCode} to {appUser.Employee.FullName}",
+        });
+
+        await db.SaveChangesAsync();
+        await db.Entry(assignment).Reference(a => a.Asset).LoadAsync();
+        await db.Entry(assignment).Reference(a => a.Employee).LoadAsync();
+        await db.Entry(assignment).Reference(a => a.CreatedBy).LoadAsync();
+
+        return CreatedAtAction(nameof(GetAll), MapAssignment(assignment));
     }
 
     [HttpPut("{id}/return")]
-    public IActionResult Return(int id, [FromBody] ReturnAssignmentRequest req)
+    public async Task<IActionResult> Return(int id, [FromBody] ReturnAssignmentRequest req)
     {
-        var assignment = store.Assignments.FirstOrDefault(a => a.Id == id);
+        var assignment = await db.HardwareAssignments
+            .Include(a => a.Asset)
+            .FirstOrDefaultAsync(a => a.Id == id);
         if (assignment == null) return NotFound();
+
         assignment.EndDate = req.ReturnDate;
+
+        db.AuditLogs.Add(new AuditLog
+        {
+            Ts       = DateTime.UtcNow,
+            UserId   = CurrentUserId,
+            Username = User.Identity?.Name ?? "",
+            Action   = "Returned assignment",
+            Target   = assignment.Asset?.AssetCode ?? id.ToString(),
+        });
+
+        await db.SaveChangesAsync();
         return NoContent();
     }
 
     [HttpDelete("{id}")]
-    public IActionResult Delete(int id)
+    public async Task<IActionResult> Delete(int id)
     {
-        var assignment = store.Assignments.FirstOrDefault(a => a.Id == id);
+        var assignment = await db.HardwareAssignments.FindAsync(id);
         if (assignment == null) return NotFound();
-        store.Assignments.Remove(assignment);
+        db.HardwareAssignments.Remove(assignment);
+        await db.SaveChangesAsync();
         return NoContent();
     }
+
+    internal static AssignmentDto MapAssignment(HardwareAssignment a) => new()
+    {
+        Id                   = a.Id,
+        AssetId              = a.AssetId,
+        AssetCode            = a.Asset?.AssetCode ?? "",
+        AssetModel           = a.Asset?.Model ?? "",
+        EmployeeId           = a.EmployeeId,
+        UserId               = a.CreatedByUserId,
+        UserDisplayName      = a.Employee?.FullName ?? "",
+        UserUsername         = a.CreatedBy?.Username ?? "",
+        EffectiveDate        = a.EffectiveDate,
+        EndDate              = a.EndDate,
+        CreatedByDisplayName = a.CreatedBy?.Employee?.FullName ?? a.CreatedBy?.Username ?? "",
+        CreatedAt            = a.CreatedAt,
+    };
 }
