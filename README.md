@@ -63,7 +63,7 @@ AssetManagement.sln
 |---|---|---|
 | admin | admin123 | Admin |
 | manager | pass123 | Manager |
-| normal user | view123 | Viewer |
+| viewer | view123 | Viewer |
 
 ---
 **Role permissions:**
