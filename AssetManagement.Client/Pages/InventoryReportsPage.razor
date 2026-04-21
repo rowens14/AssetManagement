@@ -1,3 +1,5 @@
+@using AssetManagement.Shared.Models.DTOs.Audit
+@using AssetManagement.Shared.Models.DTOs.Dashboard
 @*
     FILE:    InventoryReportsPage.razor
     PROJECT: AssetManagement.Client / Pages
@@ -15,7 +17,6 @@
 <div class="page-hdr">
     <div class="page-hdr-left">
         <h2>Reports: Inventory &amp; Compliance</h2>
-        
     </div>
 </div>
 
@@ -34,30 +35,33 @@
         <label>Site Filter</label>
         <select @bind="siteFilter">
             <option value="0">All Sites</option>
-            @foreach (var s in State.Sites) { <option value="@s.Id">@s.Name</option> }
+            @foreach (var s in State.Sites)
+            {
+                <option value="@s.Id">@s.Name</option>
+            }
         </select>
     </div>
     <div class="reports-actions">
         <button class="btn btn-primary" @onclick="GeneratePreview">
             <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                <circle cx="12" cy="12" r="3"/>
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
             </svg>
             Generate Preview
         </button>
         <button class="btn btn-secondary">
             <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/>
-                <line x1="12" y1="15" x2="12" y2="3"/>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
             PDF
         </button>
         <button class="btn btn-secondary">
             <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/>
-                <line x1="12" y1="15" x2="12" y2="3"/>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
             CSV
         </button>
@@ -72,26 +76,192 @@
             <span style="font-size:11px;color:var(--text3);">Generated @DateTime.Now.ToString("yyyy-MM-dd HH:mm")</span>
         </div>
         <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr><th>Asset ID</th><th>Type</th><th>Model</th><th>Site</th><th>Status</th><th>Assigned To</th><th>Last Audit</th></tr>
-                </thead>
-                <tbody>
-                    @foreach (var a in PreviewRows)
-                    {
-                        var assigned = State.Assignments.FirstOrDefault(x => x.AssetId == a.Id && x.IsActive);
+
+            @* ── Inventory Report ─────────────────────────────────────────────── *@
+            @if (reportType == "Inventory Report")
+            {
+                <table>
+                    <thead>
                         <tr>
-                            <td><span class="chip">@a.AssetCode</span></td>
-                            <td>@a.AssetType</td>
-                            <td>@a.Model</td>
-                            <td>@(State.GetSite(a.SiteId)?.Name ?? "—")</td>
-                            <td><AssetStatusBadge Status="@a.LifecycleStatus" /></td>
-                            <td>@assigned != null ? assigned.UserDisplayName: "—")</td>
-                            <td class="td-mono">@(a.LastAudit.HasValue ? a.LastAudit.Value.ToString("yyyy-MM-dd") : "—")</td>
+                            <th>Asset Code</th>
+                            <th>Type</th>
+                            <th>Model</th>
+                            <th>Site</th>
+                            <th>Status</th>
+                            <th>Assigned To</th>
+                            <th>Created</th>
                         </tr>
-                    }
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in FilteredAssets)
+                        {
+                            var assigned = State.Assignments.FirstOrDefault(x => x.AssetId == a.Id && x.IsActive);
+                            <tr>
+                                <td><span class="chip">@a.AssetCode</span></td>
+                                <td>@a.AssetType</td>
+                                <td>@a.Model</td>
+                                <td>@(State.GetSite(a.SiteId)?.Name ?? "—")</td>
+                                <td><AssetStatusBadge Status="@a.LifecycleStatus" /></td>
+                                <td>@(assigned != null ? assigned.UserDisplayName : "—")</td>
+                                <td class="td-mono">@a.CreatedAt.ToString("yyyy-MM-dd")</td>
+                            </tr>
+                        }
+                        @if (!FilteredAssets.Any())
+                        {
+                            <tr><td colspan="7"><div class="empty-state"><div class="empty-text">No assets found</div></div></td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            @* ── Compliance Report ────────────────────────────────────────────── *@
+            @if (reportType == "Compliance Report")
+            {
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Asset Code</th>
+                            <th>Model</th>
+                            <th>Site</th>
+                            <th>Compliance ID</th>
+                            <th>Encrypted</th>
+                            <th>Antivirus</th>
+                            <th>Last Security Audit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in FilteredAssets)
+                        {
+                            <tr>
+                                <td><span class="chip">@a.AssetCode</span></td>
+                                <td>@a.Model</td>
+                                <td>@(State.GetSite(a.SiteId)?.Name ?? "—")</td>
+                                <td>@(string.IsNullOrEmpty(a.ComplianceId) ? "—" : a.ComplianceId)</td>
+                                <td>@(a.IsEncrypted ? "Yes" : "No")</td>
+                                <td>@(a.HasAntiVirus ? "Yes" : "No")</td>
+                                <td class="td-mono">@(a.LastSecurityAudit.HasValue? a.LastSecurityAudit.Value.ToString("yyyy-MM-dd") : "—")</td>
+                            </tr>
+                        }
+                        @if (!FilteredAssets.Any())
+                        {
+                            <tr><td colspan="7"><div class="empty-state"><div class="empty-text">No assets found</div></div></td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            @* ── License Utilization Report ───────────────────────────────────── *@
+            @if (reportType == "License Utilization Report")
+            {
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th>Vendor</th>
+                            <th>Site</th>
+                            <th>License Type</th>
+                            <th>Total Seats</th>
+                            <th>Expiration Date</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var l in FilteredLicenses)
+                        {
+                            <tr>
+                                <td>@l.Product</td>
+                                <td>@(string.IsNullOrEmpty(l.Vendor) ? "—" : l.Vendor)</td>
+                                <td>@(State.GetSite(l.SiteId)?.Name ?? "—")</td>
+                                <td>@l.Type</td>
+                                <td>@l.Total</td>
+                                <td class="td-mono" style="@(l.IsExpiringSoon ? "color:var(--amber);" : "")">
+                                    @(l.Expiry.HasValue? l.Expiry.Value.ToString("yyyy-MM-dd") : "—")
+                                    @if (l.IsExpiringSoon)
+                                    {
+                                        <span style="margin-left:4px;">⚠</span>
+                                    }
+                                </td>
+                                <td><AssetStatusBadge Status="@l.Status" /></td>
+                            </tr>
+                        }
+                        @if (!FilteredLicenses.Any())
+                        {
+                            <tr><td colspan="7"><div class="empty-state"><div class="empty-text">No licenses found</div></div></td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            @* ── Lifecycle Event Report ───────────────────────────────────────── *@
+            @if (reportType == "Lifecycle Event Report")
+            {
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Asset Code</th>
+                            <th>Previous Status</th>
+                            <th>New Status</th>
+                            <th>Reason</th>
+                            <th>Changed By</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in FilteredLifecycleEvents)
+                        {
+                            <tr>
+                                <td><span class="chip">@e.AssetCode</span></td>
+                                <td><AssetStatusBadge Status="@e.OldStatus" /></td>
+                                <td><AssetStatusBadge Status="@e.NewStatus" /></td>
+                                <td>@(string.IsNullOrEmpty(e.Reason) ? "—" : e.Reason)</td>
+                                <td>@(string.IsNullOrEmpty(e.ChangedByDisplayName) ? "—" : e.ChangedByDisplayName)</td>
+                                <td class="td-mono">@e.ChangedAt.ToString("yyyy-MM-dd")</td>
+                            </tr>
+                        }
+                        @if (!FilteredLifecycleEvents.Any())
+                        {
+                            <tr><td colspan="6"><div class="empty-state"><div class="empty-text">No lifecycle events found</div></div></td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            @* ── Assignment History Report ─────────────────────────────────────── *@
+            @if (reportType == "Assignment History Report")
+            {
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Asset Code</th>
+                            <th>Model</th>
+                            <th>Assigned To</th>
+                            <th>Assigned By</th>
+                            <th>Effective Date</th>
+                            <th>Return Date</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in FilteredAssignments)
+                        {
+                            <tr>
+                                <td><span class="chip">@a.AssetCode</span></td>
+                                <td>@(string.IsNullOrEmpty(a.AssetModel) ? "—" : a.AssetModel)</td>
+                                <td>@(string.IsNullOrEmpty(a.UserDisplayName) ? "—" : a.UserDisplayName)</td>
+                                <td>@(string.IsNullOrEmpty(a.CreatedByDisplayName) ? "—" : a.CreatedByDisplayName)</td>
+                                <td class="td-mono">@a.EffectiveDate.ToString("yyyy-MM-dd")</td>
+                                <td class="td-mono">@(a.EndDate.HasValue? a.EndDate.Value.ToString("yyyy-MM-dd") : "—")</td>
+                                <td>@(a.IsActive ? "Active" : "Returned")</td>
+                            </tr>
+                        }
+                        @if (!FilteredAssignments.Any())
+                        {
+                            <tr><td colspan="7"><div class="empty-state"><div class="empty-text">No assignments found</div></div></td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
         </div>
     </div>
 }
@@ -103,15 +273,48 @@
         await State.LoadAssetsAsync();
         await State.LoadAssignmentsAsync();
         await State.LoadLicensesAsync();
+        await State.LoadLifecycleAsync();
     }
 
     string reportType = "Inventory Report";
     int siteFilter = 0;
     bool showPreview = false;
 
-    IEnumerable<AssetDto> PreviewRows => siteFilter == 0
+    void GeneratePreview() => showPreview = true;
+
+    // ── Filtered data per report type ─────────────────────────────────────────
+
+    IEnumerable<AssetDto> FilteredAssets => siteFilter == 0
         ? State.Assets
         : State.Assets.Where(a => a.SiteId == siteFilter);
 
-    void GeneratePreview() => showPreview = true;
+    IEnumerable<LicenseDto> FilteredLicenses => siteFilter == 0
+        ? State.Licenses
+        : State.Licenses.Where(l => l.SiteId == siteFilter);
+
+    IEnumerable<LifecycleEventDto> FilteredLifecycleEvents
+    {
+        get
+        {
+            if (siteFilter == 0) return State.LifecycleEvents;
+            var siteAssetIds = State.Assets
+                .Where(a => a.SiteId == siteFilter)
+                .Select(a => a.Id)
+                .ToHashSet();
+            return State.LifecycleEvents.Where(e => siteAssetIds.Contains(e.AssetId));
+        }
+    }
+
+    IEnumerable<AssignmentDto> FilteredAssignments
+    {
+        get
+        {
+            if (siteFilter == 0) return State.Assignments;
+            var siteAssetIds = State.Assets
+                .Where(a => a.SiteId == siteFilter)
+                .Select(a => a.Id)
+                .ToHashSet();
+            return State.Assignments.Where(a => siteAssetIds.Contains(a.AssetId));
+        }
+    }
 }
