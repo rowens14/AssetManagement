@@ -19,9 +19,9 @@
     var asset = Asset;
     if (asset == null) { <p>Asset not found.</p> return; }
     var assigned = State.Assignments.FirstOrDefault(x => x.AssetId == asset.Id && x.IsActive);
-    var assignedUser = assigned != null ? State.GetUser(assigned.UserId) : null;
+    var assignedUserName = assigned?.UserDisplayName ?? "—";
     var site = State.GetSite(asset.SiteId);
-    var dept = assignedUser != null ? State.GetDept(assignedUser.DeptId) : null;
+    var dept = site != null ? new { Name = site.Name } : null;
 }
 
 <button class="detail-back-btn" @onclick='()=>OnBack.InvokeAsync()'>
@@ -133,7 +133,7 @@
                 </div>
                 <div class="detail-field">
                     <div class="detail-field-label">Assigned To</div>
-                    <div class="detail-field-value">@(assignedUser?.DisplayName ?? "—")</div>
+                    <div class="detail-field-value">@assignedUserName</div>
                 </div>
             </div>
         </div>

@@ -86,7 +86,7 @@
                             <td>@a.Model</td>
                             <td>@(State.GetSite(a.SiteId)?.Name ?? "—")</td>
                             <td><AssetStatusBadge Status="@a.LifecycleStatus" /></td>
-                            <td>@(assigned != null ? State.GetUser(assigned.UserId)?.DisplayName ?? "—" : "—")</td>
+                            <td>@assigned != null ? assigned.UserDisplayName: "—")</td>
                             <td class="td-mono">@(a.LastAudit.HasValue ? a.LastAudit.Value.ToString("yyyy-MM-dd") : "—")</td>
                         </tr>
                     }
@@ -98,6 +98,13 @@
 
 
 @code {
+    protected override async Task OnInitializedAsync()
+    {
+        await State.LoadAssetsAsync();
+        await State.LoadAssignmentsAsync();
+        await State.LoadLicensesAsync();
+    }
+
     string reportType = "Inventory Report";
     int siteFilter = 0;
     bool showPreview = false;

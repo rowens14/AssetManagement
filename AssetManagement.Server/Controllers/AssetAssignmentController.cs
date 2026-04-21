@@ -35,6 +35,7 @@ public class AssignmentsController(AssetDbContext db) : ApiControllerBase
 
         if (asset == null)              return BadRequest("Asset not found.");
         if (appUser?.Employee == null)  return BadRequest("User has no linked employee record.");
+        if (asset.LifecycleStatus != "Available") return BadRequest($"Asset {asset.AssetCode} is not available for assignment.");
 
         var assignment = new HardwareAssignment
         {

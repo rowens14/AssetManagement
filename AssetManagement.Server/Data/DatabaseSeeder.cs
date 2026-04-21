@@ -25,7 +25,7 @@ public static class DatabaseSeeder
 {
     public static async Task SeedAsync(AssetDbContext db)
     {
-        if (await db.Sites.AnyAsync()) return;
+        if (await db.Sites.AnyAsync() && await db.AppUsers.AnyAsync()) return;
 
         // ── Sites ─────────────────────────────────────────────────────────────
         var naples    = new Site { Code = "NAP", Name = "Naples" };

@@ -79,7 +79,7 @@
                 @foreach (var a in rows)
                 {
                     var assigned = State.Assignments.FirstOrDefault(x => x.AssetId == a.Id && x.IsActive);
-                    var assignedUser = assigned != null ? State.GetUser(assigned.UserId)?.DisplayName : "—";
+                    var assignedUser = assigned != null ? assigned.UserDisplayName : "—";
                     <tr>
                         <td><span class="chip td-bold">@a.AssetCode</span></td>
                         <td class="td-mono">@a.AssetTag</td>
